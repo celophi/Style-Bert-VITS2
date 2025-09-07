@@ -22,5 +22,9 @@
     "deberta-v3-large-onnx": {
         "repo_id": "tsukumijima/deberta-v3-large-onnx",
         "files": ["spm.model", "model_fp16.onnx"]
-    }
+    },
+    "deberta-v3-base-japanese": {
+        "repo_id": "ku-nlp/deberta-v3-base-japanese",
+        "files": ["spm.model", "pytorch_model.bin"]
+    },
 }
