@@ -113,8 +113,7 @@ def load_model(
         pretrained_model_name_or_path,
         device_map=device_map,
         cache_dir=cache_dir,
-        revision=revision,
-        use_fast=False
+        revision=revision
     )
     logger.info(
         f"Loaded the {language.name} BERT model from {pretrained_model_name_or_path} ({time.time() - start_time:.2f}s)"
