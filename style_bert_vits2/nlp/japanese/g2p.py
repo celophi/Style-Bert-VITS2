@@ -71,11 +71,11 @@ def g2p(
             sep_tokenized.append([i])
 
     # test the full text tokenization
-    testText = "".join(text_to_sep_kata(norm_text, raise_yomi_error=False)[0])
-    testResult = bert_models.load_tokenizer(Languages.JP).tokenize(testText, return_tensors="pt")
-    print(f"testText: {testText}")
-    print(f"testResult: {testResult}")
-
+    #testText = "".join(text_to_sep_kata(norm_text, raise_yomi_error=False)[0])
+    #testResult = bert_models.load_tokenizer(Languages.JP).tokenize(testText, return_tensors="pt")
+    #print(f"testText: {testText}")
+    #print(f"testResult: {testResult}")
+    #print(f"sep_tokenized: {sep_tokenized}")
     # 各単語について、音素の数と文字の数を比較して、均等っぽく分配する
     word2ph = []
     for token, phoneme in zip(sep_tokenized, sep_phonemes):
@@ -85,11 +85,12 @@ def g2p(
         word2ph += __distribute_phone(phone_len, word_len)
 
     # 最初と最後に `_` 記号を追加、アクセントは 0（低）、word2ph もそれに合わせて追加
-    phone_tone_list = [("_", 0)] + phone_tone_list
-    word2ph = [1] + word2ph
+    # Align for CSL, _ and SEP ??
+    phone_tone_list = [("_", 0)] + [("_", 0)] + phone_tone_list + [("_", 0)]
+    word2ph = [1] + [1] + word2ph + [1]
 
-    print(f"word2ph: {word2ph}")
-    print(f"phone_tone_list: {phone_tone_list}")
+    #print(f"word2ph: {word2ph}")
+    #print(f"phone_tone_list: {phone_tone_list}")
 
     phones = [phone for phone, _ in phone_tone_list]
     tones = [tone for _, tone in phone_tone_list]

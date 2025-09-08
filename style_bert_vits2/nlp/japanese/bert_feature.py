@@ -12,6 +12,8 @@ from style_bert_vits2.nlp import bert_models, onnx_bert_models
 from style_bert_vits2.nlp.japanese.g2p import text_to_sep_kata
 from style_bert_vits2.utils import get_onnx_device_options
 
+# Punctuations
+PUNCTUATIONS = ["!", "?", "…", ",", ".", "'", "-"]
 
 if TYPE_CHECKING:
     import torch
@@ -42,7 +44,9 @@ def extract_bert_feature(
 
     # 各単語が何文字かを作る `word2ph` を使う必要があるので、読めない文字は必ず無視する
     # でないと `word2ph` の結果とテキストの文字数結果が整合性が取れない
-    text = "".join(text_to_sep_kata(text, raise_yomi_error=False)[0])
+    sep_text = text_to_sep_kata(text, raise_yomi_error=False)[0]
+    text = "".join(sep_text)
+
     if assist_text:
         assist_text = "".join(text_to_sep_kata(assist_text, raise_yomi_error=False)[0])
 
@@ -52,9 +56,82 @@ def extract_bert_feature(
     bert_models.transfer_model(Languages.JP, device)
 
     style_res_mean = None
+    tokenized = []
     with torch.no_grad():
         tokenizer = bert_models.load_tokenizer(Languages.JP)
-        inputs = tokenizer(text, return_tensors="pt")
+        # get the type of the tokenizer
+        #print(f"Tokenizer type: {type(tokenizer)}")
+
+        #inputs = tokenizer(text, return_tensors="pt")
+        #token_ids = inputs['input_ids']  # shape: [1, sequence_length]
+        #tokenized = token_ids[0].tolist()
+        #tokens = [tokenizer.convert_ids_to_tokens(token_id) for token_id in tokenized]
+        #print(f"\nTokens: {tokens}")
+
+        # I know you are supposed to keep it as a full string but
+        # I need to split it into subwords for the model
+        sep_tokenized = []
+        inputs  = []
+        for i in sep_text:
+            inputs = tokenizer(i, return_tensors="pt", add_special_tokens=False)
+            token_ids = inputs['input_ids']  # shape: [1, sequence_length]
+            token_set = token_ids[0].tolist()
+            #detokenizedPart = tokenizer.convert_ids_to_tokens(token_set)
+            #print(f"detokenized part: {detokenizedPart}")
+
+            # strip off the special tokens [CLS], '_' and [SEP]
+#            if token_set[0] == 96871:
+#                token_set = token_set[1:]
+#            if token_set[-1] == 96868:
+#                token_set = token_set[:-1]
+
+            # need to handle a case where '_' was added for some reason to a single character
+            # e.g. '-' becomes ['_-'] instead we want to just keep ['-']
+            if token_set[0] == 31:
+                token_set = token_set[1:]
+
+            sep_tokenized.append(token_set)
+
+        # Flatten the list of lists of lists into a single list
+        # e.g. [[1,2],[3]] -> [1,2,3]
+        tokenized = [item for sublist in sep_tokenized for item in sublist]
+
+        # Add back in the special tokens [CLS], '_' and [SEP]
+        tokenized = [96871, 31] + tokenized + [96868]
+        #print(f"sep_tokenized: {tokenized}")
+
+        # Convert to detokenized text
+        #detokenized = tokenizer.convert_ids_to_tokens(tokenized)
+        #print(f"detokenized: {detokenized}")
+
+        # lets compare to the previous version of using the whole text
+        #original = tokenizer(text, return_tensors="pt")
+        #original_token_ids = original['input_ids']  # shape: [1, sequence_length]
+        #original_tokenized = original_token_ids[0].tolist()
+        #print(f"original_tokenized: {original_tokenized}")
+
+        # now assign inputs['input_ids'][0] to the tokenized version
+        # not sure what to do here
+        #print(f"Before changing inputs: {inputs}")
+
+        # Convert back to tensor with the same shape and device
+        new_token_ids = torch.tensor([tokenized], dtype=torch.long, device=inputs['input_ids'].device)
+
+        # Update the inputs dictionary
+        inputs['input_ids'] = new_token_ids
+
+        # You MUST also update attention_mask and token_type_ids to match the new length
+        new_length = len(tokenized)
+        new_attention_mask = torch.ones((1, new_length), dtype=torch.long, device=inputs['attention_mask'].device)
+        new_token_type_ids = torch.zeros((1, new_length), dtype=torch.long, device=inputs['token_type_ids'].device)
+
+        inputs['attention_mask'] = new_attention_mask
+        inputs['token_type_ids'] = new_token_type_ids
+
+        #print(f"After changing inputs: {inputs}")
+
+        ####
+
         for i in inputs:
             inputs[i] = inputs[i].to(device)  # type: ignore
         res = model(**inputs, output_hidden_states=True)
@@ -67,8 +144,12 @@ def extract_bert_feature(
             style_res = torch.cat(style_res["hidden_states"][-3:-2], -1)[0].cpu()
             style_res_mean = style_res.mean(0)
 
-    print(f"text: {text}, len(text): {len(text)}, len(word2ph): {len(word2ph)}, word2ph: {word2ph}, res.shape: {res.shape}")
-    assert len(word2ph) == len(text) + 2, text
+    #print(f"text: {text}, len(text): {len(text)}, len(word2ph): {len(word2ph)}, word2ph: {word2ph}, res.shape: {res.shape}")
+
+    # The +2 here is for [CLS] and [SEP] tokens
+    #assert len(word2ph) == len(text) + 2, text
+
+    assert len(word2ph) == len(tokenized), f"{len(word2ph)} != {len(tokenized)}, {word2ph}, {tokenized}, {text}"
     word2phone = word2ph
     phone_level_feature = []
     for i in range(len(word2phone)):

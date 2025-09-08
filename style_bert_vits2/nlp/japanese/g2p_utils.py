@@ -18,8 +18,10 @@ def g2kata_tone(norm_text: str) -> list[tuple[str, int]]:
     Returns:
         カタカナと音高のリスト。
     """
-
+    print("norm_text:", norm_text)
     phones, tones, _ = g2p(norm_text, use_jp_extra=True, raise_yomi_error=False)
+    print("phones:", phones)
+    print("tones:", tones)
     return phone_tone2kata_tone(list(zip(phones, tones)))
 
 
@@ -34,7 +36,7 @@ def phone_tone2kata_tone(phone_tone: list[tuple[str, int]]) -> list[tuple[str, i
         カタカナと音高のリスト。
     """
 
-    phone_tone = phone_tone[1:]  # 最初の("_", 0)を無視
+    phone_tone = phone_tone[2:]  # 最初の("_", "_" 0)を無視
     phones = [phone for phone, _ in phone_tone]
     tones = [tone for _, tone in phone_tone]
     result: list[tuple[str, int]] = []

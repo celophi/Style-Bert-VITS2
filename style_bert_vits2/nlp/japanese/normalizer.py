@@ -81,6 +81,9 @@ __NUMBER_PATTERN = re.compile(r"[0-9]+(\.[0-9]+)?")
 __NUMBER_WITH_SEPARATOR_PATTERN = re.compile("[0-9]{1,3}(,[0-9]{3})+")
 
 
+# Example sentence: 
+# "こんにちは、初めまして。あなたの名前はなんていうの？ Do you also want me to try speaking English? いやだったら、日本語しゃべようか？"
+
 def normalize_text(text: str) -> str:
     """
     日本語のテキストを正規化する。
@@ -122,6 +125,7 @@ def normalize_text(text: str) -> str:
     # 通常の「ば」等はそのままのこされる、「あ゛」は上で「あ゙」になりここで「あ」になる
     res = res.replace("\u3099", "")  # 結合文字の濁点を削除、る゙ → る
     res = res.replace("\u309a", "")  # 結合文字の半濁点を削除、な゚ → な
+
     return res
 
 

@@ -335,9 +335,23 @@ def create_inference_app(model_holder: TTSModelHolder) -> gr.Blocks:
 
         if tone is None and language == "JP":
             # アクセント指定に使えるようにアクセント情報を返す
-            norm_text = normalize_text(text)
-            kata_tone = g2kata_tone(norm_text)
-            kata_tone_json_str = json.dumps(kata_tone, ensure_ascii=False)
+
+
+
+
+            print("kata tone is ignored for now")
+
+
+
+
+            #norm_text = normalize_text(text)
+            #kata_tone = g2kata_tone(norm_text)
+            #kata_tone_json_str = json.dumps(kata_tone, ensure_ascii=False)
+
+            #print("norm_text:", norm_text)
+            #print("kata_tone:", kata_tone)
+            #print("kata_tone_json_str:", kata_tone_json_str)
+
         elif tone is None:
             kata_tone_json_str = ""
         message = f"Success, time: {duration} seconds."
