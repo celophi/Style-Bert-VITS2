@@ -172,6 +172,20 @@ def get_text(
     return bert, ja_bert, en_bert, phone, tone, language
 
 
+def trim_silence(audio: np.ndarray, threshold: float = 0.01, min_silence_samples: int = 100) -> np.ndarray:
+    """
+    Trims leading and trailing silence from an audio array.
+    Silence is defined as samples with absolute amplitude below the threshold.
+    """
+    abs_audio = np.abs(audio)
+    # Find indices where audio is above threshold
+    non_silence = np.where(abs_audio > threshold)[0]
+    if len(non_silence) == 0:
+        return np.array([], dtype=audio.dtype)
+    start = max(non_silence[0] - min_silence_samples, 0)
+    end = min(non_silence[-1] + min_silence_samples, len(audio))
+    return audio[start:end]
+
 def infer(
     text: str,
     style_vec: NDArray[Any],
@@ -257,7 +271,9 @@ def infer(
             )
 
             audio = output[0][0, 0].data.cpu().float().numpy()
-            outputs.append(audio)
+            # Trim silence from each block before appending
+            audio_trimmed = trim_silence(audio, threshold=0.001, min_silence_samples=1600)
+            outputs.append(audio_trimmed)
 
             del (
                 x_tst,

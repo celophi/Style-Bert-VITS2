@@ -115,6 +115,13 @@ def load_model(
         cache_dir=cache_dir,
         revision=revision
     )
+
+    # For now, for multilingual, EN and JP are considered the same model
+    if language == Languages.EN:
+        __loaded_models[Languages.JP] = __loaded_models[language]
+    elif language == Languages.JP:
+        __loaded_models[Languages.EN] = __loaded_models[language]
+
     logger.info(
         f"Loaded the {language.name} BERT model from {pretrained_model_name_or_path} ({time.time() - start_time:.2f}s)"
     )
