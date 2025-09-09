@@ -1,7 +1,9 @@
 from typing import Any, Optional, Union, cast
 
 import torch
+import re
 from numpy.typing import NDArray
+import numpy as np  # Add this import at the top if not present
 
 from style_bert_vits2.constants import Languages
 from style_bert_vits2.logging import logger
@@ -189,7 +191,96 @@ def infer(
     given_phone: Optional[list[str]] = None,
     given_tone: Optional[list[int]] = None,
 ) -> NDArray[Any]:
-    is_jp_extra = hps.version.endswith("JP-Extra")
+
+    print("input text:", text)
+    print("language:", language)
+    print("hyperparameters:", hps)
+    print("skip_start:", skip_start)
+    print("skip_end:", skip_end)
+    print("assist_text:", assist_text)
+    print("assist_text_weight:", assist_text_weight)
+    print("given_phone:", given_phone)
+    print("given_tone:", given_tone)
+
+    blocks = split_jp_en_blocks(text)
+    print("split_jp_en_blocks:", blocks)
+
+    # I want to process each block separately and infer them one by one.
+    # Then concatenate the results somehow.
+    outputs = []
+    for block, lang in blocks:
+        bert, ja_bert, en_bert, phones, tones, lang_ids = get_text(
+            block,
+            lang,
+            hps,
+            device,
+            assist_text=assist_text,
+            assist_text_weight=assist_text_weight,
+            given_phone=given_phone,
+            given_tone=given_tone,
+        )
+
+        print(f"Block: '{block}' Language: {lang}")
+        print("  phones:", phones)
+        print("  tones:", tones)
+        print("  lang_ids:", lang_ids)
+        print("  bert shape:", bert.shape)
+        print("  ja_bert shape:", ja_bert.shape)
+        print("  en_bert shape:", en_bert.shape)
+
+        with torch.no_grad():
+            x_tst = phones.to(device).unsqueeze(0)
+            tones = tones.to(device).unsqueeze(0)
+            lang_ids = lang_ids.to(device).unsqueeze(0)
+            bert = bert.to(device).unsqueeze(0)
+            ja_bert = ja_bert.to(device).unsqueeze(0)
+            en_bert = en_bert.to(device).unsqueeze(0)
+            x_tst_lengths = torch.LongTensor([phones.size(0)]).to(device)
+            style_vec_tensor = torch.from_numpy(style_vec).to(device).unsqueeze(0)
+            del phones
+            sid_tensor = torch.LongTensor([sid]).to(device)
+
+            output = cast(SynthesizerTrn, net_g).infer(
+                x_tst,
+                x_tst_lengths,
+                sid_tensor,
+                tones,
+                lang_ids,
+                bert,
+                ja_bert,
+                en_bert,
+                style_vec=style_vec_tensor,
+                length_scale=length_scale,
+                sdp_ratio=sdp_ratio,
+                noise_scale=noise_scale,
+                noise_scale_w=noise_scale_w,
+            )
+
+            audio = output[0][0, 0].data.cpu().float().numpy()
+            outputs.append(audio)
+
+            del (
+                x_tst,
+                tones,
+                lang_ids,
+                bert,
+                x_tst_lengths,
+                sid_tensor,
+                ja_bert,
+                en_bert
+            )
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+                
+    # Concatenate all audio blocks into one array
+    if outputs:
+        audio_concat = np.concatenate(outputs)
+        return audio_concat
+    else:
+        return np.array([], dtype=np.float32)
+
+    """
     bert, ja_bert, en_bert, phones, tones, lang_ids = get_text(
         text,
         language,
@@ -275,3 +366,51 @@ def infer(
             torch.cuda.empty_cache()
 
         return audio
+    """
+
+def split_jp_en_blocks(text: str) -> list[tuple[str, Languages]]:
+    """
+    Split the input text into alternating Japanese and English blocks,
+    returning each block with its associated language.
+    """
+    jp = r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3400-\u4DBFー。、！？\uFF01-\uFF0F]+'
+    en = r'[a-zA-Z\s]+[.,!?\'"]*'
+    pattern = re.compile(f'({jp})|({en})')
+    blocks = []
+    pos = 0
+    for m in pattern.finditer(text):
+        if m.start() > pos:
+            # Add any intervening non-matched text (e.g. symbols)
+            block = text[pos:m.start()].strip()
+            if block:
+                # Determine language for non-matched block
+                if re.search(jp, block):
+                    lang = Languages.JP
+                elif re.search(en, block):
+                    lang = Languages.EN
+                else:
+                    lang = None
+                blocks.append((block, lang))
+        block = m.group(0).strip()
+        if block:
+            if m.group(1):
+                lang = Languages.JP
+            elif m.group(2):
+                lang = Languages.EN
+            else:
+                lang = None
+            blocks.append((block, lang))
+        pos = m.end()
+    if pos < len(text):
+        block = text[pos:].strip()
+        if block:
+            if re.search(jp, block):
+                lang = Languages.JP
+            elif re.search(en, block):
+                lang = Languages.EN
+            else:
+                lang = None
+            blocks.append((block, lang))
+    # Remove blocks with None language if you want only JP/EN
+    blocks = [(b, l) for b, l in blocks if l is not None]
+    return blocks

@@ -1070,36 +1070,52 @@ class SynthesizerTrn(nn.Module):
         sdp_ratio: float = 0.0,
         y: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, tuple[torch.Tensor, ...]]:
-        # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, tone, language, bert)
-        # g = self.gst(y)
+        # This function performs inference for the TTS model, generating audio features from input text and style information.
+
+        # Step 1: Get speaker embedding or reference embedding
         if self.n_speakers > 0:
-            g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
+            # If multi-speaker, get speaker embedding from sid
+            g = self.emb_g(sid).unsqueeze(-1)  # [batch, hidden, 1]
         else:
+            # Otherwise, use reference audio to get embedding
             assert y is not None
             g = self.ref_enc(y.transpose(1, 2)).unsqueeze(-1)
+
+        # Step 2: Encode input text and style into latent representations
         x, m_p, logs_p, x_mask = self.enc_p(
             x, x_lengths, tone, language, bert, ja_bert, en_bert, style_vec, sid, g=g
         )
+
+        # Step 3: Duration prediction (SDP and DP)
+        # SDP (stochastic duration predictor) and DP (deterministic predictor) are combined by sdp_ratio
         logw = self.sdp(x, x_mask, g=g, reverse=True, noise_scale=noise_scale_w) * (
             sdp_ratio
         ) + self.dp(x, x_mask, g=g) * (1 - sdp_ratio)
-        w = torch.exp(logw) * x_mask * length_scale
-        w_ceil = torch.ceil(w)
-        y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()
+
+        # Step 4: Calculate durations and masks
+        w = torch.exp(logw) * x_mask * length_scale  # predicted durations
+        w_ceil = torch.ceil(w)  # round up durations
+        y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()  # output lengths
         y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, None), 1).to(
             x_mask.dtype
-        )
-        attn_mask = torch.unsqueeze(x_mask, 2) * torch.unsqueeze(y_mask, -1)
-        attn = commons.generate_path(w_ceil, attn_mask)
+        )  # mask for output sequence
+        attn_mask = torch.unsqueeze(x_mask, 2) * torch.unsqueeze(y_mask, -1)  # attention mask
+        attn = commons.generate_path(w_ceil, attn_mask)  # monotonic attention path
 
+        # Step 5: Align latent representations to output length
         m_p = torch.matmul(attn.squeeze(1), m_p.transpose(1, 2)).transpose(
             1, 2
-        )  # [b, t', t], [b, t, d] -> [b, d, t']
+        )  # align mean
         logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(
             1, 2
-        )  # [b, t', t], [b, t, d] -> [b, d, t']
+        )  # align log-variance
 
-        z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
-        z = self.flow(z_p, y_mask, g=g, reverse=True)
+        # Step 6: Sample latent variable z_p and apply flow-based transformation
+        z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale  # sample latent
+        z = self.flow(z_p, y_mask, g=g, reverse=True)  # invertible flow transformation
+
+        # Step 7: Decode to audio features
         o = self.dec((z * y_mask)[:, :, :max_len], g=g)
+
+        # Return output features, attention, mask, and intermediate variables
         return o, attn, y_mask, (z, z_p, m_p, logs_p)
