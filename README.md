@@ -8,6 +8,8 @@ The language selection currently will always select this model, and inference is
 Note that the BERT model supports tokenization of the entire text; however, due to the alignment issues that happen uniquely with Japanese, tokenization is still done based on subwords using pyopenjtalk before being fed into the model's tokenizer. The resulting tokens are then assigned phonemes using the existing heuristic.
 
 Also note, that because the BERT model has a different hidden size of 768, existing Style-Bert-VITS2 base models cannot be used and must be retrained until a knowledge distillation technique is implemented.
+
+
 ---
 
 **利用の際は必ず[お願いとデフォルトモデルの利用規約](/docs/TERMS_OF_USE.md)をお読みください。**
