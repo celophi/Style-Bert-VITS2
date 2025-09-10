@@ -1,5 +1,15 @@
 # Style-Bert-VITS2
 
+## Fork Information
+
+This is a very rough implementation in order to use [deberta-v3-base-japanese](https://huggingface.co/ku-nlp/deberta-v3-base-japanese) which supports English and Japanese in the same BERT.
+The language selection currently will always select this model, and inference is supported for mixed languages with minimal code-switching support.
+
+Note that the BERT model supports tokenization of the entire text; however, due to the alignment issues that happen uniquely with Japanese, tokenization is still done based on subwords using pyopenjtalk before being fed into the model's tokenizer. The resulting tokens are then assigned phonemes using the existing heuristic.
+
+
+---
+
 **利用の際は必ず[お願いとデフォルトモデルの利用規約](/docs/TERMS_OF_USE.md)をお読みください。**
 
 Bert-VITS2 with more controllable voice styles.
