@@ -55,6 +55,87 @@ global_step = 0
 api = HfApi()
 
 
+def adjust_discriminator_learning_rate(optim_d, loss_gen, loss_disc, base_lr):
+    """
+    Dynamically adjust discriminator learning rate based on relative loss improvement trends.
+    
+    This uses exponential moving averages to track percentage changes in losses:
+    - If disc improving faster (percentage-wise): reduce disc LR
+    - If gen improving faster (percentage-wise): increase disc LR
+    - Otherwise, maintain current LR
+    
+    The multiplier persists across epochs to avoid scheduler resets.
+    """
+    # Initialize moving averages as class attributes if they don't exist
+    if not hasattr(adjust_discriminator_learning_rate, 'gen_loss_ema'):
+        adjust_discriminator_learning_rate.gen_loss_ema = loss_gen.item()
+        adjust_discriminator_learning_rate.disc_loss_ema = loss_disc.item()
+        adjust_discriminator_learning_rate.gen_trend = 0.0
+        adjust_discriminator_learning_rate.disc_trend = 0.0
+        adjust_discriminator_learning_rate.lr_multiplier = 0.37  # Track our multiplier separately. Start at 37%
+        adjust_discriminator_learning_rate.last_scheduler_lr = None
+    
+    # Update exponential moving averages (alpha=0.1 for smoothing)
+    alpha = 0.1
+    current_gen = loss_gen.item()
+    current_disc = loss_disc.item()
+    
+    # Calculate relative changes (percentage improvement)
+    # Use small epsilon to avoid division by zero
+    eps = 1e-8
+    gen_relative_change = (current_gen - adjust_discriminator_learning_rate.gen_loss_ema) / (adjust_discriminator_learning_rate.gen_loss_ema + eps)
+    disc_relative_change = (current_disc - adjust_discriminator_learning_rate.disc_loss_ema) / (adjust_discriminator_learning_rate.disc_loss_ema + eps)
+    
+    # Update EMAs
+    adjust_discriminator_learning_rate.gen_loss_ema = (
+        alpha * current_gen + (1 - alpha) * adjust_discriminator_learning_rate.gen_loss_ema
+    )
+    adjust_discriminator_learning_rate.disc_loss_ema = (
+        alpha * current_disc + (1 - alpha) * adjust_discriminator_learning_rate.disc_loss_ema
+    )
+    
+    # Update trend tracking with relative changes
+    adjust_discriminator_learning_rate.gen_trend = (
+        alpha * gen_relative_change + (1 - alpha) * adjust_discriminator_learning_rate.gen_trend
+    )
+    adjust_discriminator_learning_rate.disc_trend = (
+        alpha * disc_relative_change + (1 - alpha) * adjust_discriminator_learning_rate.disc_trend
+    )
+    
+    # Decision logic: Compare relative trends (more negative = better performance)
+    trend_diff = adjust_discriminator_learning_rate.disc_trend - adjust_discriminator_learning_rate.gen_trend
+    
+    if trend_diff < 0:  # Disc improving much faster (percentage-wise)
+        adjust_discriminator_learning_rate.lr_multiplier *= 0.995  # Reduce multiplier by 0.5%
+        adjustment_reason = f"Disc improving faster, reducing LR (trend_diff: {trend_diff:.3f})"
+    elif trend_diff > 0.025:  # Gen improving much faster (percentage-wise)
+        adjust_discriminator_learning_rate.lr_multiplier *= 1.005  # Increase multiplier by 0.5%
+        adjustment_reason = f"Gen improving faster, increasing disc LR (trend_diff: {trend_diff:.3f})"
+    else:
+        adjustment_reason = f"Balanced trends (trend_diff: {trend_diff:.3f})"
+    
+    # Apply bounds to the multiplier: keep between 0.1× and 2.0× of base learning rate
+    adjust_discriminator_learning_rate.lr_multiplier = max(0.1, min(2.0, adjust_discriminator_learning_rate.lr_multiplier))
+    
+    # Get the current scheduler-determined base LR
+    # If scheduler changed the LR, we need to detect this and apply our multiplier to the new base
+    current_base_lr = base_lr  # This should be the original hps.train.learning_rate
+    
+    # Calculate the new learning rate: base_lr * our_persistent_multiplier
+    new_lr = current_base_lr * adjust_discriminator_learning_rate.lr_multiplier
+    
+    # Apply the new learning rate to discriminator optimizer
+    for param_group in optim_d.param_groups:
+        param_group['lr'] = new_lr
+    
+    # Update adjustment reason if we hit bounds
+    if adjust_discriminator_learning_rate.lr_multiplier == 0.1:
+        adjustment_reason += " (hit lower bound)"
+    elif adjust_discriminator_learning_rate.lr_multiplier == 2.0:
+        adjustment_reason += " (hit upper bound)"
+    
+    return adjust_discriminator_learning_rate.lr_multiplier, adjustment_reason
+
 def run():
     # Command line configuration is not recommended unless necessary, use config.yml
     parser = argparse.ArgumentParser()
@@ -360,15 +441,19 @@ def run():
             param.requires_grad = False
 
     net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(local_rank)
+    # Initialize optimizers for both generator and discriminator
+    # Both start with the same learning rate, but discriminator LR will be dynamically adjusted
     optim_g = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, net_g.parameters()),
         hps.train.learning_rate,
         betas=hps.train.betas,
         eps=hps.train.eps,
     )
+    # Discriminator optimizer - its learning rate will be adjusted dynamically during training
+    # to maintain balance between generator and discriminator
     optim_d = torch.optim.AdamW(
         net_d.parameters(),
-        hps.train.learning_rate,
+        hps.train.learning_rate,  # This will be the base LR that gets multiplied by our adjustment factor
         betas=hps.train.betas,
         eps=hps.train.eps,
     )
@@ -760,6 +845,34 @@ def train_and_evaluate(
         grad_norm_g = commons.clip_grad_value_(net_g.parameters(), None)
         scaler.step(optim_g)
         scaler.update()
+
+        ##########################################################
+        # Additions because discriminator was outperforming generator
+        # We will adjust the discriminator learning rate every 100 steps
+
+        # Dynamic discriminator learning rate adjustment
+        # Adjust the discriminator learning rate every 100 steps to maintain balance
+        # between generator and discriminator training
+        if global_step % 100 == 0:
+            # Use the original base learning rate from hyperparameters, not the scheduler-adjusted one
+            # This ensures our multiplier calculations remain consistent across scheduler updates
+            original_base_lr = hps.train.learning_rate
+            
+            # Adjust discriminator learning rate based on loss trends
+            multiplier, reason = adjust_discriminator_learning_rate(
+                optim_d, 
+                loss_gen_all, 
+                loss_disc_all, 
+                original_base_lr  # Use original base, not scheduler-adjusted
+            )
+            
+            # Log the adjustment for monitoring (only on main process to avoid spam)
+            if rank == 0:
+                logger.info(f"Step {global_step}: {reason} (multiplier: {multiplier:.2f}, " 
+                          f"gen_loss: {loss_gen_all.item():.4f}, disc_loss: {loss_disc_all.item():.4f}, "
+                          f"ratio: {loss_gen_all.item() / max(loss_disc_all.item(), 1e-8):.2f})")
+                
+        ##########################################################
 
         if rank == 0:
             if global_step % hps.train.log_interval == 0 and not hps.speedup:
