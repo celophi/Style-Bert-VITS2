@@ -194,6 +194,13 @@ def __distribute_phone(n_phone: int, n_word: int) -> list[int]:
 def __text_to_words(text: str) -> list[list[str]]:
     tokenizer = bert_models.load_tokenizer(Languages.EN)
     tokens = tokenizer.tokenize(text)
+
+    print(f"English Tokens: {tokens}")
+    
+    # get the english representation subword from tokens
+    tokenized_text = tokenizer.convert_tokens_to_string(tokens)
+    print(f"Tokenized text: '{tokenized_text}'")
+
     words = []
     for idx, t in enumerate(tokens):
         if t.startswith("▁"):

@@ -223,6 +223,7 @@ def infer(
     # Then concatenate the results somehow.
     outputs = []
     for block, lang in blocks:
+
         bert, ja_bert, en_bert, phones, tones, lang_ids = get_text(
             block,
             lang,
@@ -243,6 +244,7 @@ def infer(
         print("  en_bert shape:", en_bert.shape)
 
         with torch.no_grad():
+
             x_tst = phones.to(device).unsqueeze(0)
             tones = tones.to(device).unsqueeze(0)
             lang_ids = lang_ids.to(device).unsqueeze(0)
@@ -289,6 +291,12 @@ def infer(
                 torch.cuda.empty_cache()
 
                 
+    # Check memory usage
+    allocated = torch.cuda.memory_allocated(device) / (1024 ** 3)
+    reserved = torch.cuda.memory_reserved(device) / (1024 ** 3)
+    print(f"Allocated: {allocated:.2f} GB")
+    print(f"Reserved:  {reserved:.2f} GB")
+
     # Concatenate all audio blocks into one array
     if outputs:
         audio_concat = np.concatenate(outputs)
@@ -390,7 +398,7 @@ def split_jp_en_blocks(text: str) -> list[tuple[str, Languages]]:
     returning each block with its associated language.
     """
     jp = r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3400-\u4DBFー。、！？\uFF01-\uFF0F]+'
-    en = r'[a-zA-Z\s]+[.,!?\'"]*'
+    en = r"[a-zA-Z]+(?:['\-][a-zA-Z]+)*(?:\s+[a-zA-Z]+(?:['\-][a-zA-Z]+)*)*[.,!?\"]*"
     pattern = re.compile(f'({jp})|({en})')
     blocks = []
     pos = 0
