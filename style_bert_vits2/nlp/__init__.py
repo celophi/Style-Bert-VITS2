@@ -121,7 +121,7 @@ def clean_text(
     if language == Languages.JP:
         from style_bert_vits2.nlp.japanese.g2p import g2p
         from style_bert_vits2.nlp.japanese.normalizer import normalize_text
-
+        print("Normalizing Japanese text...")
         norm_text = normalize_text(text)
         phones, tones, word2ph = g2p(norm_text, use_jp_extra, raise_yomi_error)
     elif language == Languages.EN:

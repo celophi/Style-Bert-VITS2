@@ -160,9 +160,10 @@ def __convert_numbers_to_words(text: str) -> str:
     Returns:
         str: 変換されたテキスト
     """
-
+    print("Converting numbers to words: "+ text)
     res = __NUMBER_WITH_SEPARATOR_PATTERN.sub(lambda m: m[0].replace(",", ""), text)
     res = __CURRENCY_PATTERN.sub(lambda m: m[2] + __CURRENCY_MAP.get(m[1], m[1]), res)
     res = __NUMBER_PATTERN.sub(lambda m: num2words(m[0], lang="ja"), res)
 
+    print("Converted text: "+ res)
     return res

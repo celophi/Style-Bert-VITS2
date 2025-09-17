@@ -216,7 +216,8 @@ def infer(
     print("given_phone:", given_phone)
     print("given_tone:", given_tone)
 
-    blocks = split_jp_en_blocks(text)
+    #blocks = split_jp_en_blocks(text)
+    blocks = [(text, language)]
     print("split_jp_en_blocks:", blocks)
 
     # I want to process each block separately and infer them one by one.
